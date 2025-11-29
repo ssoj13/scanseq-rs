@@ -1,0 +1,41 @@
+[package]
+name = "scanseq"
+version = "0.1.0"
+edition = "2021"
+description = "File sequence detector in Rust with Python interface for automation systems"
+license = "MIT"
+repository = "https://github.com/ssoj13/scanseq-rs"
+homepage = "https://github.com/ssoj13/scanseq-rs"
+authors = ["Alex Khalyavin <joss13@gmail.com>",]
+keywords = ["vfx", "sequence", "files", "animation", "frames"]
+categories = ["filesystem", "multimedia"]
+
+[lib]
+name = "scanseq"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "scanseq-cli"
+path = "src/main.rs"
+
+[dependencies]
+glob = "0.3"
+rayon = "1.11"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jwalk = "0.8"
+indicatif = "0.18"
+log = "0.4"
+env_logger = "0.11"
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[dev-dependencies]
+tempfile = "3.23"
+
+[profile.release]
+debug = true  # Enable debug symbols for profiling

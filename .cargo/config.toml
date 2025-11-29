@@ -1,0 +1,3 @@
+[alias]
+docs = "doc --no-deps --open"
+tests = "test --features python"

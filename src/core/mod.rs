@@ -21,6 +21,8 @@ mod scan;
 pub use seq::Seq;
 pub use scan::get_seqs;
 
+use file::File;
+
 use rayon::prelude::*;
 use std::path::Path;
 use std::time::Instant;
@@ -126,6 +128,40 @@ impl Scanner {
 
         result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         result
+    }
+
+    /// Find sequence containing the given file.
+    /// Scans parent directory (non-recursive) to find matching files.
+    ///
+    /// # Arguments
+    /// * `path` - Path to a file that may be part of a sequence
+    ///
+    /// # Returns
+    /// `Some(Seq)` if file is part of a sequence, `None` otherwise
+    #[allow(dead_code)] // Public library API
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Option<Seq> {
+        let path = path.as_ref();
+        let dir = path.parent()?;
+
+        // Read directory (non-recursive, no mask filter)
+        let entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+
+        let target = File::new(path);
+        if !target.has_nums() {
+            return None;
+        }
+
+        let mut files: Vec<File> = entries.into_iter()
+            .map(File::new)
+            .filter(|f| f.has_nums())
+            .collect();
+
+        Seq::extract_seq(&target, &mut files)
     }
 
     /// Scan multiple paths in parallel (static method).

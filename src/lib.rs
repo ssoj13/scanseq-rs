@@ -118,10 +118,17 @@ impl PySeq {
 #[pymethods]
 impl PySeq {
     fn __repr__(&self) -> String {
-        format!(
-            "Seq(pattern='{}', range=({}, {}), count={}, missed={})",
-            self.pattern, self.start, self.end, self.indices.len(), self.missed.len()
-        )
+        if self.missed.is_empty() {
+            format!(
+                "Seq(\"{}\", start={}, end={}, frames={})",
+                self.pattern, self.start, self.end, self.indices.len()
+            )
+        } else {
+            format!(
+                "Seq(\"{}\", start={}, end={}, frames={}, missed={})",
+                self.pattern, self.start, self.end, self.indices.len(), self.missed.len()
+            )
+        }
     }
 
     /// Support dict(seq) by implementing Mapping protocol
@@ -145,12 +152,7 @@ impl PySeq {
     }
 
     fn __str__(&self) -> String {
-        if self.missed.is_empty() {
-            format!("{} [{}-{}] ({} files)", self.pattern, self.start, self.end, self.indices.len())
-        } else {
-            format!("{} [{}-{}] ({} files, {} missed)",
-                self.pattern, self.start, self.end, self.indices.len(), self.missed.len())
-        }
+        self.__repr__()
     }
 
     /// Number of files in sequence
@@ -363,6 +365,22 @@ impl Scanner {
             seqs: Arc::new(seqs.into_iter().map(PySeq::from).collect()),
             elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
             errors,
+        })
+    }
+
+    /// Find sequence containing the given file.
+    /// Scans parent directory (non-recursive) to find matching files.
+    ///
+    /// Args:
+    ///     path: Path to a file that may be part of a sequence
+    ///
+    /// Returns:
+    ///     Seq if file is part of a sequence, None otherwise
+    #[staticmethod]
+    #[pyo3(signature = (path))]
+    fn from_file(py: Python, path: String) -> Option<PySeq> {
+        py.allow_threads(|| {
+            core::Scanner::from_file(&path).map(PySeq::from)
         })
     }
 

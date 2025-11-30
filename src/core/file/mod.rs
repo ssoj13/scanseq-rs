@@ -51,11 +51,11 @@ impl File {
         let (drive, path, name, ext, num_groups) = parse_fpn(&path_str);
         let mask = make_mask(&name, &num_groups);
 
-        // On Windows, normalize case for grouping (paths are case-insensitive)
+        // On Windows, normalize case and path separators for grouping
         #[cfg(windows)]
         let (drive, path, ext, mask) = (
             drive.to_lowercase(),
-            path.to_lowercase(),
+            path.to_lowercase().replace('\\', "/"),
             ext.to_lowercase(),
             mask.to_lowercase(),
         );

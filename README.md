@@ -8,6 +8,7 @@ Fast, Rust-powered library and Python extension for detecting numbered file sequ
 - **Memory Efficient**: Pre-computed digit groups, mask-based grouping
 - **Smart Detection**: Automatically picks longest sequence when files have multiple number groups
 - **Missing Frame Tracking**: Identifies gaps in sequences automatically
+- **Single File Lookup**: Find sequence from any file path in O(n) time
 
 ## Quick Start
 
@@ -35,6 +36,11 @@ fn main() {
     // Static methods (return ScanResult)
     let result = Scanner::get_seqs(&["/renders"], true, Some("*.exr"), 2);
     let result = Scanner::get_seq("/renders", true, Some("*.exr"), 2);
+
+    // Find sequence from a single file
+    if let Some(seq) = Scanner::from_file("/renders/shot_0001.exr") {
+        println!("Found: {} [{}-{}]", seq.pattern(), seq.start, seq.end);
+    }
 
     // Low-level function (returns Result<Vec<Seq>>)
     let seqs = get_seqs("/renders", true, Some("*.exr"), 2)?;
@@ -71,6 +77,11 @@ for seq in scanner.result.seqs:
 # Static methods
 result = scanseq.Scanner.get_seqs(["/renders"], recursive=True)
 result = scanseq.Scanner.get_seq("/renders", mask="*.exr")
+
+# Find sequence from a single file
+seq = scanseq.Scanner.from_file("/renders/shot_0001.exr")
+if seq:
+    print(f"{seq.pattern} [{seq.start}-{seq.end}]")
 
 # Convert Seq to dict
 data = dict(seq)  # or seq.to_dict()
@@ -122,6 +133,9 @@ impl Scanner {
     // Static methods - return ScanResult
     pub fn get_seq(root: P, recursive: bool, mask: Option<&str>, min_len: usize) -> ScanResult
     pub fn get_seqs(roots: &[P], recursive: bool, mask: Option<&str>, min_len: usize) -> ScanResult
+
+    // Find sequence containing a file (scans parent directory)
+    pub fn from_file(path: P) -> Option<Seq>
 
     // Instance methods
     pub fn rescan(&mut self)
@@ -202,6 +216,7 @@ scanner.result       # ScanResult - scan results
 ```python
 Scanner.get_seq(root, recursive=True, mask=None, min_len=2)   # Single path
 Scanner.get_seqs(roots, recursive=True, mask=None, min_len=2) # Multiple paths
+Scanner.from_file(path)                                       # Find seq from file
 ```
 
 **Instance Methods:**

@@ -111,43 +111,83 @@ impl Seq {
     /// Uses mask-based grouping to handle unpadded sequences correctly.
     pub fn group_seqs(flist: &mut Vec<File>) -> Vec<Seq> {
         // Phase 1: Group by sig_hash (drive + path + mask + ext)
-        // Files with same mask pattern (e.g., "render_@_img_@") go together
         let estimated_groups = (flist.len() / 10).max(16);
         let mut by_hash: HashMap<u64, Vec<File>> = HashMap::with_capacity(estimated_groups);
 
         for file in flist.drain(..) {
             if !file.has_nums() {
-                continue; // Skip files without digit groups
+                continue;
             }
             by_hash.entry(file.sig_hash()).or_default().push(file);
         }
 
+        // Phase 2: Build sequences from each hash group
         let mut seqs = Vec::new();
-
-        // Phase 2: Process each hash group
         for (_hash, files) in by_hash {
-            if files.len() < 2 {
-                continue; // Single file is not a sequence
-            }
-
-            // Find which digit group is the frame number (most unique values)
-            let frame_grp_idx = find_frame_group(&files);
-
-            // Sub-group by anchor values (moves files, no cloning)
-            let sub_groups = sub_group_by_anchors(files, frame_grp_idx);
-
-            // Create Seq for each sub-group with >= 2 files
-            for sub_files in sub_groups.into_values() {
-                if sub_files.len() >= 2 {
-                    if let Some(seq) = Seq::from_files(&sub_files, frame_grp_idx) {
-                        seqs.push(seq);
-                    }
-                }
-            }
+            seqs.extend(build_seqs_from_group(files));
         }
-
         seqs
     }
+
+    /// Extract sequence containing target file from file list.
+    /// Drains files with matching sig_hash, returns Seq containing target.
+    pub fn extract_seq(target: &File, files: &mut Vec<File>) -> Option<Seq> {
+        if !target.has_nums() {
+            return None;
+        }
+
+        let target_hash = target.sig_hash();
+
+        // Extract files with matching hash
+        let matching: Vec<File> = files.extract_if(.., |f| f.sig_hash() == target_hash).collect();
+
+        if matching.is_empty() {
+            return None;
+        }
+
+        // Build sequences from this group
+        let seqs = build_seqs_from_group(matching);
+
+        // Find frame number of target file
+        let frame_grp_idx = find_frame_group(std::slice::from_ref(target));
+        let target_frame: Option<i64> = target.num_groups.get(frame_grp_idx).and_then(|&(start, len)| {
+            let end = start.saturating_add(len);
+            if end <= target.name.len() {
+                target.name[start..end].parse().ok()
+            } else {
+                None
+            }
+        });
+
+        // Find sequence containing target's frame
+        target_frame.and_then(|frame| {
+            seqs.into_iter().find(|seq| seq.indices.contains(&frame))
+        })
+    }
+}
+
+/// Build sequences from files with same sig_hash (shared core logic).
+fn build_seqs_from_group(files: Vec<File>) -> Vec<Seq> {
+    if files.len() < 2 {
+        return Vec::new();
+    }
+
+    // Find which digit group is the frame number
+    let frame_grp_idx = find_frame_group(&files);
+
+    // Sub-group by anchor values
+    let sub_groups = sub_group_by_anchors(files, frame_grp_idx);
+
+    // Create Seq for each sub-group with >= 2 files
+    let mut seqs = Vec::new();
+    for sub_files in sub_groups.into_values() {
+        if sub_files.len() >= 2 {
+            if let Some(seq) = Seq::from_files(&sub_files, frame_grp_idx) {
+                seqs.push(seq);
+            }
+        }
+    }
+    seqs
 }
 
 /// Find which digit group is the frame number (has most unique values).

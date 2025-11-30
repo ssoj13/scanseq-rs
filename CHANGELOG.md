@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - 2025-11-29
 
+### New Features
+
+#### Scanner::from_file() - Single File Lookup
+- **New API**: `Scanner::from_file(path)` finds sequence containing a given file
+- Scans parent directory (non-recursive) to find matching files
+- Uses shared `extract_seq()` core logic
+- **Rust**: `Scanner::from_file("/renders/shot_0001.exr") -> Option<Seq>`
+- **Python**: `Scanner.from_file("/renders/shot_0001.exr") -> Seq | None`
+
+#### Refactored Sequence Building
+- Extracted `build_seqs_from_group()` - shared core logic for sequence construction
+- `group_seqs()` now uses shared logic (O(n) HashMap approach preserved)
+- `extract_seq()` uses same logic for single-file lookup
+- **Impact**: DRY code, consistent behavior across all scanning methods
+
+### Improvements
+
+#### Performance
+- **Arc for iterators** (`lib.rs`): `SeqIter` now uses `Arc<Vec<PySeq>>` instead of cloning
+- **Parallel multi-root scanning**: `get_seqs()` and `rescan()` use `par_iter()` for parallel root processing
+- **Impact**: Faster iteration, better multi-root performance
+
+#### Windows Compatibility
+- **Path separator normalization**: Backslashes normalized to forward slashes on Windows
+- Fixes hash mismatch between `D:/_demo/path` and `D:\_demo\path`
+- **Impact**: `from_file()` works correctly regardless of path format
+
+#### API Changes
+- **Renamed**: `ScanResult.sequences` -> `ScanResult.seqs` (shorter, cleaner)
+- **Python `__repr__`**: New format `Seq("pattern", start=N, end=N, frames=N, missed=N)`
+- **Python `__str__`**: Same as `__repr__` for consistent output
+
 ### Bug Hunt Fixes
 
 #### Safety & Correctness (HIGH Priority)

@@ -16,3 +16,8 @@ result = scanseq.Scanner.get_seq('D:/_demo/Srcs/Kz', recursive=False)
 print(f"get_seq found {len(result.seqs)} sequences:")
 for seq in result.seqs:
     print(f"  {seq.pattern} [{seq.start}-{seq.end}]")
+
+
+S2 = scanseq.Scanner(roots=["C:/Programs/Ntutil", ], recursive=True, mask="*", min_len=5)
+pp(S2)
+

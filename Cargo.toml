@@ -38,4 +38,6 @@ python = ["pyo3"]
 tempfile = "3.23"
 
 [profile.release]
-debug = true  # Enable debug symbols for profiling
+lto = true
+strip = true
+codegen-units = 1

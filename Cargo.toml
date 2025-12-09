@@ -38,6 +38,6 @@ python = ["pyo3"]
 tempfile = "3.23"
 
 [profile.release]
-lto = true
+lto = false
 strip = true
 codegen-units = 1

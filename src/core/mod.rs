@@ -72,6 +72,12 @@ pub struct Scanner {
     pub result: ScanResult,
 }
 
+/// Common VFX image extensions for convenience
+pub const VFX_IMAGE_EXTS: &[&str] = &["exr", "dpx", "tif", "tiff", "png", "jpg", "jpeg", "tga", "hdr"];
+/// Common video extensions
+#[allow(dead_code)] // Public API
+pub const VIDEO_EXTS: &[&str] = &["mp4", "mov", "avi", "mkv", "webm", "m4v", "mxf"];
+
 impl Scanner {
     /// Create scanner and run initial scan.
     ///
@@ -99,6 +105,41 @@ impl Scanner {
         };
         scanner.rescan();
         scanner
+    }
+
+    // === Builder pattern for flexible configuration ===
+
+    /// Create scanner builder for single root path.
+    /// Call `.scan()` to execute.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let scanner = Scanner::path("/renders")
+    ///     .recursive(true)
+    ///     .extensions(&["exr", "png"])
+    ///     .min_len(2)
+    ///     .scan();
+    /// ```
+    #[allow(dead_code)]
+    pub fn path<P: AsRef<Path>>(root: P) -> ScannerBuilder {
+        ScannerBuilder {
+            roots: vec![root.as_ref().to_string_lossy().to_string()],
+            recursive: true,
+            mask: None,
+            min_len: 2,
+        }
+    }
+
+    /// Create scanner builder for multiple root paths.
+    /// Call `.scan()` to execute.
+    #[allow(dead_code)]
+    pub fn paths<P: AsRef<Path>>(roots: &[P]) -> ScannerBuilder {
+        ScannerBuilder {
+            roots: roots.iter().map(|p| p.as_ref().to_string_lossy().to_string()).collect(),
+            recursive: true,
+            mask: None,
+            min_len: 2,
+        }
     }
 
     /// Scan a single path (static method).
@@ -262,5 +303,84 @@ impl std::fmt::Display for Scanner {
             self.result.seqs.len(),
             self.result.elapsed_ms
         )
+    }
+}
+
+// === Scanner Builder Pattern ===
+
+/// Builder for configuring Scanner with fluent API.
+/// Created via `Scanner::path()` or `Scanner::paths()`.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ScannerBuilder {
+    roots: Vec<String>,
+    recursive: bool,
+    mask: Option<String>,
+    min_len: usize,
+}
+
+impl ScannerBuilder {
+    /// Set recursive scanning (default: true)
+    #[allow(dead_code)]
+    pub fn recursive(mut self, recursive: bool) -> Self {
+        self.recursive = recursive;
+        self
+    }
+
+    /// Set file mask/glob pattern (e.g., "*.exr")
+    #[allow(dead_code)]
+    pub fn mask(mut self, mask: &str) -> Self {
+        self.mask = Some(mask.to_string());
+        self
+    }
+
+    /// Set extensions to scan (convenience for common patterns).
+    /// Converts `&["exr", "png"]` to mask `"*.exr;*.png"`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// Scanner::path("/renders")
+    ///     .extensions(&["exr", "png", "jpg"])
+    ///     .scan();
+    /// ```
+    #[allow(dead_code)]
+    pub fn extensions(mut self, exts: &[&str]) -> Self {
+        if exts.is_empty() {
+            self.mask = None;
+        } else {
+            // Build glob pattern: "*.exr" or "*.{exr,png,jpg}"
+            let pattern = if exts.len() == 1 {
+                format!("*.{}", exts[0])
+            } else {
+                format!("*.{{{}}}", exts.join(","))
+            };
+            self.mask = Some(pattern);
+        }
+        self
+    }
+
+    /// Use predefined VFX image extensions (exr, dpx, tif, png, jpg, tga, hdr).
+    #[allow(dead_code)]
+    pub fn vfx_images(self) -> Self {
+        self.extensions(VFX_IMAGE_EXTS)
+    }
+
+    /// Set minimum sequence length (default: 2)
+    #[allow(dead_code)]
+    pub fn min_len(mut self, min_len: usize) -> Self {
+        self.min_len = min_len;
+        self
+    }
+
+    /// Execute scan and return configured Scanner with results.
+    #[allow(dead_code)]
+    pub fn scan(self) -> Scanner {
+        Scanner::new(self.roots, self.recursive, self.mask.as_deref(), self.min_len)
+    }
+
+    /// Execute scan and return only the sequences (convenience).
+    #[allow(dead_code)]
+    pub fn into_seqs(self) -> Vec<Seq> {
+        self.scan().result.seqs
     }
 }

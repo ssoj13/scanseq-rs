@@ -107,6 +107,178 @@ impl Seq {
         &self.pattern
     }
 
+    // === Frame-to-path methods (public API for library users) ===
+
+    /// Format frame number into full file path using pattern.
+    /// Handles both padded (####) and unpadded (@) placeholders.
+    ///
+    /// # Arguments
+    /// * `frame` - Frame number to format
+    ///
+    /// # Returns
+    /// Full file path with frame number substituted
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = ...; // pattern: "/renders/img_####.exr", padding: 4
+    /// assert_eq!(seq.format_frame(42), "/renders/img_0042.exr");
+    /// ```
+    #[allow(dead_code)] // Public API
+    fn format_frame(&self, frame: i64) -> String {
+        if self.padding >= 2 {
+            // Padded: replace #### with zero-padded frame number
+            let placeholder = "#".repeat(self.padding);
+            let frame_str = format!("{:0width$}", frame, width = self.padding);
+            self.pattern.replace(&placeholder, &frame_str)
+        } else {
+            // Unpadded: replace @ with raw frame number
+            self.pattern.replace('@', &frame.to_string())
+        }
+    }
+
+    /// Get full file path for specific frame number.
+    /// Returns None if frame doesn't exist in sequence (not in indices).
+    ///
+    /// # Arguments
+    /// * `frame` - Frame number to look up
+    ///
+    /// # Returns
+    /// `Some(path)` if frame exists, `None` otherwise
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = ...; // frames 1-100, pattern: "/renders/img_####.exr"
+    /// assert_eq!(seq.get_file(42), Some("/renders/img_0042.exr".to_string()));
+    /// assert_eq!(seq.get_file(999), None); // frame doesn't exist
+    /// ```
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn get_file(&self, frame: i64) -> Option<String> {
+        // O(log n) lookup in sorted indices - handles sequences with gaps
+        if self.indices.binary_search(&frame).is_ok() {
+            Some(self.format_frame(frame))
+        } else {
+            None
+        }
+    }
+
+    /// Check if sequence is complete (no missing frames).
+    /// A complete sequence has no gaps between start and end.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq1 = ...; // frames 1,2,3,4,5
+    /// assert!(seq1.is_complete());
+    ///
+    /// let seq2 = ...; // frames 1,2,4,5 (missing 3)
+    /// assert!(!seq2.is_complete());
+    /// ```
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn is_complete(&self) -> bool {
+        self.missed.is_empty()
+    }
+
+    /// Expand sequence to all frame paths in range (start..=end).
+    /// Includes paths for ALL frames including missing ones.
+    ///
+    /// # Safety
+    /// Limited to 1M frames to prevent OOM. Returns error if range exceeds limit.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = ...; // frames 1-3, pattern: "/img_@.exr"
+    /// assert_eq!(seq.expand()?, vec!["/img_1.exr", "/img_2.exr", "/img_3.exr"]);
+    /// ```
+    #[allow(dead_code)] // Public API
+    pub fn expand(&self) -> Result<Vec<String>, String> {
+        const MAX_EXPAND: i64 = 1_000_000;
+        let count = self.end.saturating_sub(self.start).saturating_add(1);
+        if count > MAX_EXPAND {
+            return Err(format!(
+                "Range too large: {} frames (max {})",
+                count, MAX_EXPAND
+            ));
+        }
+        Ok((self.start..=self.end)
+            .map(|f| self.format_frame(f))
+            .collect())
+    }
+
+    /// Expand sequence to only existing frame paths (indices only).
+    /// Unlike `expand()`, this skips missing frames.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = ...; // frames 1,3 (missing 2), pattern: "/img_@.exr"
+    /// assert_eq!(seq.expand_existing(), vec!["/img_1.exr", "/img_3.exr"]);
+    /// ```
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn expand_existing(&self) -> Vec<String> {
+        self.indices.iter().map(|&f| self.format_frame(f)).collect()
+    }
+
+    /// Get first file path in sequence.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn first_file(&self) -> String {
+        self.format_frame(self.start)
+    }
+
+    /// Get last file path in sequence.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn last_file(&self) -> String {
+        self.format_frame(self.end)
+    }
+
+    /// Get frame count (number of existing frames, not range).
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn frame_count(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// Get total range (end - start + 1), including missing frames.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn range_count(&self) -> i64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    /// Convert sequence to HashMap for serialization/inspection.
+    /// Useful for JSON export or debugging.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn to_map(&self) -> HashMap<&'static str, serde_json::Value> {
+        use serde_json::json;
+        let mut map = HashMap::new();
+        map.insert("pattern", json!(self.pattern));
+        map.insert("start", json!(self.start));
+        map.insert("end", json!(self.end));
+        map.insert("padding", json!(self.padding));
+        map.insert("indices", json!(self.indices));
+        map.insert("missed", json!(self.missed));
+        map.insert("count", json!(self.indices.len()));
+        map.insert("is_complete", json!(self.missed.is_empty()));
+        map
+    }
+
+    /// Serialize sequence to JSON string.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Serialize sequence to pretty JSON string.
+    #[must_use]
+    #[allow(dead_code)] // Public API
+    pub fn to_json_pretty(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
     /// Group files into sequences.
     /// Uses mask-based grouping to handle unpadded sequences correctly.
     pub fn group_seqs(flist: &mut Vec<File>) -> Vec<Seq> {

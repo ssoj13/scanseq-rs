@@ -3,36 +3,116 @@
 //! Fast, Rust-powered library and Python extension for detecting numbered file sequences.
 //! Designed for VFX, animation, and media production pipelines.
 //!
-//! # Crate Structure
-//!
-//! ```text
-//! scanseq (lib.rs)
-//! ├── core/           - Pure Rust sequence detection engine
-//! │   ├── mod.rs      - Module exports (Scanner, Seq, get_seqs)
-//! │   ├── file/       - File parsing, digit groups, mask generation
-//! │   ├── seq/        - Sequence grouping algorithm
-//! │   └── scan.rs     - Parallel directory scanning
-//! └── Python bindings (feature = "python")
-//! ```
-//!
 //! # Features
 //!
-//! - **`python`**: Enables PyO3 bindings for Python integration
-//!   - Build with: `maturin develop --features python`
-//!   - Or: `cargo build --features python`
+//! - **Parallel Scanning**: Uses jwalk for fast directory traversal
+//! - **Memory Efficient**: Pre-computed digit groups, mask-based grouping
+//! - **Smart Detection**: Automatically picks longest sequence when files have multiple number groups
+//! - **Missing Frame Tracking**: Identifies gaps in sequences automatically
+//! - **Builder Pattern**: Fluent API for scanner configuration
+//! - **Frame Path Resolution**: Get file paths for any frame number
 //!
-//! # Rust API
+//! # Quick Start
 //!
 //! ```ignore
 //! use scanseq::core::Scanner;
 //!
-//! let scanner = Scanner::new(vec!["/renders"], true, Some("*.exr"), 2);
+//! // Builder pattern (recommended)
+//! let scanner = Scanner::path("/renders")
+//!     .recursive(true)
+//!     .extensions(&["exr", "png", "jpg"])
+//!     .min_len(2)
+//!     .scan();
+//!
+//! // Or use VFX presets
+//! let scanner = Scanner::path("/renders")
+//!     .vfx_images()  // exr, dpx, tif, png, jpg, tga, hdr
+//!     .scan();
+//!
+//! println!("Found {} sequences in {:.1}ms",
+//!     scanner.len(), scanner.result.elapsed_ms);
+//!
 //! for seq in scanner.iter() {
 //!     println!("{} [{}-{}]", seq.pattern(), seq.start, seq.end);
+//!
+//!     // Get specific frame path
+//!     if let Some(path) = seq.get_file(seq.start) {
+//!         println!("  First: {}", path);
+//!     }
+//!
+//!     // Check for gaps
+//!     if !seq.is_complete() {
+//!         println!("  Missing {} frames", seq.missed.len());
+//!     }
 //! }
 //! ```
 //!
+//! # Classic Constructor
+//!
+//! ```ignore
+//! use scanseq::core::Scanner;
+//!
+//! let scanner = Scanner::new(
+//!     vec!["/renders", "/comp"],
+//!     true,           // recursive
+//!     Some("*.exr"),  // mask
+//!     2               // min_len
+//! );
+//!
+//! for seq in scanner.iter() {
+//!     println!("{}", seq);
+//! }
+//! ```
+//!
+//! # Static Methods
+//!
+//! ```ignore
+//! use scanseq::core::Scanner;
+//!
+//! // Scan single path
+//! let result = Scanner::get_seq("/renders", true, Some("*.exr"), 2);
+//!
+//! // Scan multiple paths in parallel
+//! let result = Scanner::get_seqs(&["/renders", "/comp"], true, Some("*.exr"), 2);
+//!
+//! // Find sequence from a single file
+//! if let Some(seq) = Scanner::from_file("/renders/shot_0001.exr") {
+//!     println!("Found: {} [{}-{}]", seq.pattern(), seq.start, seq.end);
+//! }
+//! ```
+//!
+//! # Seq Methods
+//!
+//! ```ignore
+//! // Frame operations
+//! seq.get_file(42)       // Get path for frame 42
+//! seq.first_file()       // First frame path
+//! seq.last_file()        // Last frame path
+//! seq.is_complete()      // No missing frames?
+//! seq.frame_count()      // Number of existing frames
+//! seq.range_count()      // Total range size
+//!
+//! // Expansion
+//! seq.expand()           // All paths in range (Result<Vec<String>>)
+//! seq.expand_existing()  // Only existing frame paths
+//!
+//! // Serialization
+//! seq.to_json()          // JSON string
+//! seq.to_json_pretty()   // Pretty JSON
+//! ```
+//!
+//! # Pattern Notation
+//!
+//! - `####` - Padded sequences (e.g., `0001`, `0002`)
+//! - `@` - Unpadded sequences (e.g., `1`, `2`, `100`)
+//!
+//! Examples:
+//! - `render_####.exr` -> `render_0001.exr`, `render_0002.exr`
+//! - `shot_@.png` -> `shot_1.png`, `shot_2.png`
+//!
 //! # Python API
+//!
+//! Enable with `--features python`:
 //!
 //! ```python
 //! import scanseq
@@ -40,6 +120,9 @@
 //! scanner = scanseq.Scanner(["/renders"], recursive=True, mask="*.exr")
 //! for seq in scanner.result.seqs:
 //!     print(f"{seq.pattern} [{seq.start}-{seq.end}]")
+//!     path = seq.get_file(seq.start)  # Get first frame path
+//!     if not seq.is_complete():
+//!         print(f"  Missing: {seq.missed}")
 //! ```
 //!
 //! # Algorithm Overview
@@ -49,7 +132,7 @@
 //! 3. **Group**: Hash by mask (e.g., `render_@.exr`), sub-group by anchors
 //! 4. **Detect**: Find frame numbers, compute padding, identify gaps
 //!
-//! See [`core`] module for detailed algorithm documentation.
+//! See [`core`] module for detailed API documentation.
 
 pub mod core;
 

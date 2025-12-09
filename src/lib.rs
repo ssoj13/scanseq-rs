@@ -185,15 +185,9 @@ impl From<CoreSeq> for PySeq {
 
 #[cfg(feature = "python")]
 impl PySeq {
-    /// Format frame number into path using pattern
+    /// Format frame number into path using pattern (delegates to core::format_frame)
     fn format_frame(&self, frame: i64) -> String {
-        if self.padding >= 2 {
-            let placeholder = "#".repeat(self.padding);
-            let frame_str = format!("{:0width$}", frame, width = self.padding);
-            self.pattern.replace(&placeholder, &frame_str)
-        } else {
-            self.pattern.replace('@', &frame.to_string())
-        }
+        core::format_frame(&self.pattern, self.padding, frame)
     }
 }
 
@@ -284,6 +278,57 @@ impl PySeq {
         dict.set_item("missed", &self.missed)?;
         dict.set_item("count", self.indices.len())?;
         Ok(dict.into_any().unbind())
+    }
+
+    /// Get first frame path
+    fn first_file(&self) -> String {
+        self.format_frame(self.start)
+    }
+
+    /// Get last frame path
+    fn last_file(&self) -> String {
+        self.format_frame(self.end)
+    }
+
+    /// Expand to only existing frame paths (skips missing)
+    fn expand_existing(&self) -> Vec<String> {
+        self.indices.iter().map(|&f| self.format_frame(f)).collect()
+    }
+
+    /// Total range size (end - start + 1)
+    fn range_count(&self) -> i64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    /// Number of existing frames (same as len)
+    fn frame_count(&self) -> usize {
+        self.indices.len()
+    }
+
+    /// Convert to JSON string
+    fn to_json(&self) -> String {
+        serde_json::json!({
+            "pattern": self.pattern,
+            "start": self.start,
+            "end": self.end,
+            "padding": self.padding,
+            "indices": self.indices,
+            "missed": self.missed,
+            "count": self.indices.len()
+        }).to_string()
+    }
+
+    /// Convert to pretty JSON string
+    fn to_json_pretty(&self) -> String {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "pattern": self.pattern,
+            "start": self.start,
+            "end": self.end,
+            "padding": self.padding,
+            "indices": self.indices,
+            "missed": self.missed,
+            "count": self.indices.len()
+        })).unwrap_or_default()
     }
 }
 
@@ -494,6 +539,26 @@ impl Scanner {
             index: 0,
         })
     }
+
+    /// Scan files by extensions (not sequences, just file list).
+    ///
+    /// Args:
+    ///     roots: List of directories to scan
+    ///     recursive: Scan subdirectories (default: True)
+    ///     exts: List of extensions or glob patterns (e.g., ["mp4", "jp*"])
+    ///
+    /// Returns:
+    ///     List of file paths matching extensions
+    #[staticmethod]
+    #[pyo3(signature = (roots, recursive=true, exts=vec![]))]
+    fn scan_files(py: Python, roots: Vec<String>, recursive: bool, exts: Vec<String>) -> PyResult<Vec<String>> {
+        let ext_refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
+        py.allow_threads(|| {
+            core::scan_files(&roots, recursive, &ext_refs)
+                .map(|files| files.iter().map(|p| p.display().to_string()).collect())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+        })
+    }
 }
 
 #[cfg(feature = "python")]
@@ -570,5 +635,8 @@ fn scanseq(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Scanner>()?;
     m.add_class::<PyScanResult>()?;
     m.add_class::<PySeq>()?;
+    // Export extension constants
+    m.add("IMAGE_EXTS", core::VFX_IMAGE_EXTS)?;
+    m.add("VIDEO_EXTS", core::VIDEO_EXTS)?;
     Ok(())
 }

@@ -125,15 +125,7 @@ impl Seq {
     /// ```
     #[allow(dead_code)] // Public API
     fn format_frame(&self, frame: i64) -> String {
-        if self.padding >= 2 {
-            // Padded: replace #### with zero-padded frame number
-            let placeholder = "#".repeat(self.padding);
-            let frame_str = format!("{:0width$}", frame, width = self.padding);
-            self.pattern.replace(&placeholder, &frame_str)
-        } else {
-            // Unpadded: replace @ with raw frame number
-            self.pattern.replace('@', &frame.to_string())
-        }
+        format_frame(&self.pattern, self.padding, frame)
     }
 
     /// Get full file path for specific frame number.
@@ -317,11 +309,13 @@ impl Seq {
             return None;
         }
 
+        // Find frame group using all matching files (not just target)
+        let frame_grp_idx = find_frame_group(&matching);
+
         // Build sequences from this group
         let seqs = build_seqs_from_group(matching);
 
         // Find frame number of target file
-        let frame_grp_idx = find_frame_group(std::slice::from_ref(target));
         let target_frame: Option<i64> = target.num_groups.get(frame_grp_idx).and_then(|&(start, len)| {
             let end = start.saturating_add(len);
             if end <= target.name.len() {
@@ -489,6 +483,21 @@ fn gen_pattern(file: &File, frame_grp_idx: usize, padding: usize) -> String {
 
     // Build full path pattern
     format!("{}{}{}{}", file.drive, file.path.replace('\\', "/"), result, file.ext)
+}
+
+/// Format frame number into path using pattern and padding.
+/// Public function to avoid duplication between Rust Seq and Python PySeq.
+///
+/// - padding >= 2: replace #### with zero-padded frame (e.g., 0042)
+/// - padding < 2: replace @ with raw frame number
+pub fn format_frame(pattern: &str, padding: usize, frame: i64) -> String {
+    if padding >= 2 {
+        let placeholder = "#".repeat(padding);
+        let frame_str = format!("{:0width$}", frame, width = padding);
+        pattern.replace(&placeholder, &frame_str)
+    } else {
+        pattern.replace('@', &frame.to_string())
+    }
 }
 
 #[cfg(test)]

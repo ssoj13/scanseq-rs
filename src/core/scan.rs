@@ -66,7 +66,7 @@ pub fn scan_dirs<P: AsRef<Path>>(root: P, recursive: bool) -> Result<Vec<PathBuf
 /// let images = scan_files(&["/renders"], false, &["exr", "jp*"])?; // jpg, jpeg, jp2...
 /// let all = scan_files(&["/data"], true, &[])?; // all files
 /// ```
-pub fn scan_files<P: AsRef<Path>>(roots: &[P], recursive: bool, exts: &[&str]) -> Result<Vec<PathBuf>, String> {
+pub fn scan_files<P: AsRef<Path> + Sync>(roots: &[P], recursive: bool, exts: &[&str]) -> Result<Vec<PathBuf>, String> {
     // Pre-compile glob patterns (only for entries with wildcards)
     let patterns: Vec<Option<glob::Pattern>> = exts
         .iter()
@@ -80,17 +80,23 @@ pub fn scan_files<P: AsRef<Path>>(roots: &[P], recursive: bool, exts: &[&str]) -
         .collect();
 
     let files: Vec<PathBuf> = roots
-        .iter()
+        .par_iter()
         .flat_map(|root| {
             let walker = if recursive {
-                WalkDir::new(root.as_ref())
+                WalkDir::new(root.as_ref()).follow_links(false)
             } else {
-                WalkDir::new(root.as_ref()).max_depth(1)
+                WalkDir::new(root.as_ref()).max_depth(1).follow_links(false)
             };
 
             walker
                 .into_iter()
-                .filter_map(|e| e.ok())
+                .filter_map(|e| match e {
+                    Ok(entry) => Some(entry),
+                    Err(err) => {
+                        warn!("Skipping inaccessible path: {}", err);
+                        None
+                    }
+                })
                 .filter(|e| e.file_type().is_file())
                 .filter_map(|e| {
                     let path = e.path();

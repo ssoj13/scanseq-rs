@@ -11,13 +11,14 @@ Fast, Rust-powered library and Python extension for detecting numbered file sequ
 - **Single File Lookup**: Find sequence from any file path in O(n) time
 - **Builder Pattern**: Fluent API for scanner configuration
 - **Frame Path Resolution**: Get file paths for any frame number
+- **File Scanner**: Scan files by extensions with glob patterns (`jp*`, `tif?`)
 
 ## Quick Start
 
 ### Rust API
 
 ```rust
-use scanseq::core::{Scanner, Seq, get_seqs};
+use scanseq::core::{Scanner, Seq, get_seqs, scan_files};
 
 fn main() {
     // Builder pattern (recommended)
@@ -68,6 +69,10 @@ fn main() {
 
     // Low-level function (returns Result<Vec<Seq>>)
     let seqs = get_seqs("/renders", true, Some("*.exr"), 2).unwrap();
+
+    // Scan files by extensions (not sequences, just file list)
+    let videos = scan_files(&["/media"], true, &["mp4", "mov", "avi"]).unwrap();
+    let images = scan_files(&["/renders"], true, &["exr", "jp*", "tif*"]).unwrap();  // glob patterns
 }
 ```
 
@@ -141,6 +146,15 @@ scanseq-cli -p /renders -m "*.exr" -o
 
 # JSON output
 scanseq-cli -p /renders -oj
+
+# Scan files by extensions (not sequences)
+scanseq-cli -p /media -s mp4 mov avi -r -o
+
+# With glob patterns
+scanseq-cli -p /renders -s exr jp* tif* -r -o
+
+# JSON file list
+scanseq-cli -p /media -s mp4 -r -oj
 ```
 
 ## API Reference
@@ -213,7 +227,7 @@ pub struct ScanResult {
 
 #### `get_seqs`
 
-Low-level scanning function:
+Low-level sequence scanning function:
 
 ```rust
 pub fn get_seqs<P: AsRef<Path>>(
@@ -222,6 +236,30 @@ pub fn get_seqs<P: AsRef<Path>>(
     mask: Option<&str>,         // Glob pattern filter
     min_len: usize              // Minimum sequence length
 ) -> Result<Vec<Seq>, String>
+```
+
+#### `scan_files`
+
+Scan files by extensions (returns file paths, not sequences):
+
+```rust
+pub fn scan_files<P: AsRef<Path>>(
+    roots: &[P],                // Directories to scan
+    recursive: bool,            // Scan subdirectories
+    exts: &[&str]               // Extensions or glob patterns
+) -> Result<Vec<PathBuf>, String>
+```
+
+Examples:
+```rust
+// Exact extensions
+let videos = scan_files(&["/media"], true, &["mp4", "mov", "avi"])?;
+
+// Glob patterns
+let images = scan_files(&["/renders"], true, &["jp*", "tif?"])?;  // jpg, jpeg, jp2, tiff
+
+// All files (empty extensions)
+let all = scan_files(&["/data"], true, &[])?;
 ```
 
 #### `Seq`
@@ -357,13 +395,14 @@ repr(seq)             # Detailed representation
 scanseq-cli [OPTIONS]
 
 Options:
-  -p, --path <PATH>   Directory to scan (can specify multiple)
-  -r, --recursive     Scan subdirectories recursively
-  -m, --mask <MASK>   File mask/glob pattern
-  -n, --min <N>       Minimum sequence length (default: 2)
-  -o, --out           Print sequences to stdout (default: off)
-  -j, --json          Use JSON format (with -o)
-  -h, --help          Print help
+  -p, --path <PATH>           Directory to scan (can specify multiple)
+  -r, --recursive             Scan subdirectories recursively
+  -m, --mask <MASK>           File mask/glob pattern for sequences
+  -s, --scan-files <EXT>...   Scan files by extensions (e.g., -s mp4 mov jp*)
+  -n, --min <N>               Minimum sequence length (default: 2)
+  -o, --out                   Print results to stdout (default: off)
+  -j, --json                  Use JSON format (with -o)
+  -h, --help                  Print help
 ```
 
 ## Installation

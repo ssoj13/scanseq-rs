@@ -556,7 +556,7 @@ impl Scanner {
         py.allow_threads(|| {
             core::scan_files(&roots, recursive, &ext_refs)
                 .map(|files| files.iter().map(|p| p.display().to_string()).collect())
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)
         })
     }
 }

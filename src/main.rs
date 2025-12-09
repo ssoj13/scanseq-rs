@@ -43,7 +43,7 @@
 mod core;
 
 use clap::Parser;
-use core::{scan_files, Scanner, Seq};
+use core::{format_frame, scan_files, Scanner, Seq};
 use std::path::PathBuf;
 
 use log::{debug, info};
@@ -194,11 +194,13 @@ fn main() {
                 println!("Sequences:");
                 for seq in &all_seqs {
                     let pattern = seq.pattern();
+                    let first_file = format_frame(pattern, seq.padding, seq.start);
                     if seq.missed.is_empty() {
                         println!("  {} [{}-{}] ({} files)", pattern, seq.start, seq.end, seq.len());
                     } else {
                         println!("  {} [{}-{}] ({} files, {} missed)", pattern, seq.start, seq.end, seq.len(), seq.missed.len());
                     }
+                    debug!("    First: {}", first_file);
                 }
 
                 println!("\nSummary: {} sequences, {} files", all_seqs.len(), total_files);

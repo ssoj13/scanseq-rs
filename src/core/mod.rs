@@ -19,7 +19,7 @@ mod seq;
 mod scan;
 
 pub use seq::Seq;
-pub use scan::get_seqs;
+pub use scan::{get_seqs, scan_files};
 
 use file::File;
 

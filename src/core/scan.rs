@@ -52,14 +52,78 @@ pub fn scan_dirs<P: AsRef<Path>>(root: P, recursive: bool) -> Result<Vec<PathBuf
     Ok(folders)
 }
 
-/// Scan single folder for files matching mask
+/// Scan folder(s) for files matching extensions.
+/// Uses jwalk for parallel recursive scanning.
 ///
-/// Returns file list (non-recursive, just this folder)
-pub fn scan_files<P: AsRef<Path>>(folder: P, mask: Option<&str>) -> Result<Vec<PathBuf>, String> {
-    let folder = folder.as_ref();
-    let entries = std::fs::read_dir(folder).map_err(|e| format!("Failed to read dir {}: {}", folder.display(), e))?;
+/// # Arguments
+/// * `roots` - Directory or directories to scan
+/// * `recursive` - Scan subdirectories
+/// * `exts` - File extensions or glob patterns (e.g., &["mp4", "jp*", "tif?"])
+///
+/// # Example
+/// ```ignore
+/// let videos = scan_files(&["/media"], true, &["mp4", "mov", "avi"])?;
+/// let images = scan_files(&["/renders"], false, &["exr", "jp*"])?; // jpg, jpeg, jp2...
+/// let all = scan_files(&["/data"], true, &[])?; // all files
+/// ```
+pub fn scan_files<P: AsRef<Path>>(roots: &[P], recursive: bool, exts: &[&str]) -> Result<Vec<PathBuf>, String> {
+    // Pre-compile glob patterns (only for entries with wildcards)
+    let patterns: Vec<Option<glob::Pattern>> = exts
+        .iter()
+        .map(|e| {
+            if e.contains('*') || e.contains('?') {
+                glob::Pattern::new(&e.to_lowercase()).ok()
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // Pre-compile glob pattern once (if mask contains wildcards)
+    let files: Vec<PathBuf> = roots
+        .iter()
+        .flat_map(|root| {
+            let walker = if recursive {
+                WalkDir::new(root.as_ref())
+            } else {
+                WalkDir::new(root.as_ref()).max_depth(1)
+            };
+
+            walker
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .filter_map(|e| {
+                    let path = e.path();
+
+                    // Filter by extension if provided
+                    if !exts.is_empty() {
+                        let ext = path.extension()?.to_str()?.to_lowercase();
+                        let matched = exts.iter().zip(patterns.iter()).any(|(e, pat)| {
+                            match pat {
+                                Some(p) => p.matches(&ext),  // glob match
+                                None => e.eq_ignore_ascii_case(&ext),  // exact match
+                            }
+                        });
+                        if !matched {
+                            return None;
+                        }
+                    }
+
+                    Some(path.to_path_buf())
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    Ok(files)
+}
+
+/// Scan single folder for files with glob mask (internal, used by get_seqs)
+fn scan_files_glob<P: AsRef<Path>>(folder: P, mask: Option<&str>) -> Result<Vec<PathBuf>, String> {
+    let folder = folder.as_ref();
+    let entries = std::fs::read_dir(folder)
+        .map_err(|e| format!("Failed to read dir {}: {}", folder.display(), e))?;
+
     let glob_pattern = match mask {
         Some(m) if m.contains('*') => Some(glob::Pattern::new(m).map_err(|e| format!("Invalid mask: {}", e))?),
         _ => None,
@@ -71,15 +135,9 @@ pub fn scan_files<P: AsRef<Path>>(folder: P, mask: Option<&str>) -> Result<Vec<P
         if !path.is_file() {
             continue;
         }
-        // Apply mask if provided
-        if let Some(mask) = mask {
+        if let Some(ref pattern) = glob_pattern {
             if let Some(name) = path.file_name() {
-                let name_str = name.to_string_lossy();
-                if let Some(ref pattern) = glob_pattern {
-                    if !pattern.matches(&name_str) {
-                        continue;
-                    }
-                } else if name_str != mask {
+                if !pattern.matches(&name.to_string_lossy()) {
                     continue;
                 }
             }
@@ -130,7 +188,7 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
             .par_iter()
             .flat_map(|folder| {
                 // Scan files in this folder
-                let files = match scan_files(folder, mask) {
+                let files = match scan_files_glob(folder, mask) {
                     Ok(f) => f,
                     Err(e) => {
                         warn!("Error scanning {}: {}", folder.display(), e);
@@ -178,4 +236,104 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
     info!("Total time: {:.2}s", start.elapsed().as_secs_f64());
 
     Ok(all_seqs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_scan_files_flat() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create test files
+        fs::write(root.join("video.mp4"), "").unwrap();
+        fs::write(root.join("video.mov"), "").unwrap();
+        fs::write(root.join("image.exr"), "").unwrap();
+
+        // Scan all (empty extensions = all files)
+        let all = scan_files(&[root], false, &[]).unwrap();
+        assert_eq!(all.len(), 3);
+
+        // Scan specific extension
+        let videos = scan_files(&[root], false, &["mp4"]).unwrap();
+        assert_eq!(videos.len(), 1);
+        assert!(videos[0].to_string_lossy().contains("video.mp4"));
+    }
+
+    #[test]
+    fn test_scan_files_recursive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let sub = root.join("subdir");
+        fs::create_dir(&sub).unwrap();
+
+        // Files in root and subdir
+        fs::write(root.join("a.exr"), "").unwrap();
+        fs::write(sub.join("b.exr"), "").unwrap();
+        fs::write(sub.join("c.mp4"), "").unwrap();
+
+        // Non-recursive - only root
+        let flat = scan_files(&[root], false, &["exr"]).unwrap();
+        assert_eq!(flat.len(), 1);
+
+        // Recursive - both
+        let deep = scan_files(&[root], true, &["exr"]).unwrap();
+        assert_eq!(deep.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_files_multi_ext() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("a.mp4"), "").unwrap();
+        fs::write(root.join("b.mov"), "").unwrap();
+        fs::write(root.join("c.avi"), "").unwrap();
+        fs::write(root.join("d.exr"), "").unwrap();
+
+        // Multiple extensions
+        let videos = scan_files(&[root], false, &["mp4", "mov", "avi"]).unwrap();
+        assert_eq!(videos.len(), 3);
+    }
+
+    #[test]
+    fn test_scan_files_multiple_roots() {
+        let dir1 = tempdir().unwrap();
+        let dir2 = tempdir().unwrap();
+
+        fs::write(dir1.path().join("a.exr"), "").unwrap();
+        fs::write(dir2.path().join("b.exr"), "").unwrap();
+
+        let files = scan_files(&[dir1.path(), dir2.path()], false, &["exr"]).unwrap();
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_files_glob_patterns() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("a.jpg"), "").unwrap();
+        fs::write(root.join("b.jpeg"), "").unwrap();
+        fs::write(root.join("c.jp2"), "").unwrap();
+        fs::write(root.join("d.tif"), "").unwrap();
+        fs::write(root.join("e.tiff"), "").unwrap();
+        fs::write(root.join("f.png"), "").unwrap();
+
+        // jp* matches jpg, jpeg, jp2
+        let jp = scan_files(&[root], false, &["jp*"]).unwrap();
+        assert_eq!(jp.len(), 3);
+
+        // tif? matches tiff but not tif (single char)
+        let tif = scan_files(&[root], false, &["tif?"]).unwrap();
+        assert_eq!(tif.len(), 1);
+
+        // Mix exact and glob
+        let mixed = scan_files(&[root], false, &["png", "jp*"]).unwrap();
+        assert_eq!(mixed.len(), 4);
+    }
 }

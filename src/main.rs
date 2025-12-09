@@ -43,7 +43,7 @@
 mod core;
 
 use clap::Parser;
-use core::{Scanner, Seq};
+use core::{scan_files, Scanner, Seq};
 use std::path::PathBuf;
 
 use log::{debug, info};
@@ -60,9 +60,13 @@ struct Args {
     #[arg(short = 'r', long = "recursive")]
     recursive: bool,
 
-    /// File mask/pattern (e.g., "*.exr")
+    /// File mask/pattern (e.g., "*.exr") for sequence detection
     #[arg(short, long)]
     mask: Option<String>,
+
+    /// Scan files by extensions (e.g., -s exr mp4 mov). Supports glob: jp* tif?
+    #[arg(short = 's', long = "scan-files", num_args = 1..)]
+    scan_exts: Option<Vec<String>>,
 
     /// Minimum sequence length
     #[arg(short = 'n', long = "min", default_value = "2")]
@@ -100,7 +104,47 @@ fn main() {
         debug!("Scanning: {}", path.display());
     }
 
-    // Use Scanner API for unified interface
+    // Mode: scan files by extension OR detect sequences
+    if let Some(exts) = &args.scan_exts {
+        // File scanning mode
+        let ext_refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
+        match scan_files(&args.paths, args.recursive, &ext_refs) {
+            Ok(files) => {
+                if args.out {
+                    if args.json {
+                        #[derive(serde::Serialize)]
+                        struct FilesOutput {
+                            files: Vec<String>,
+                            total: usize,
+                        }
+                        let output = FilesOutput {
+                            total: files.len(),
+                            files: files.iter().map(|p| p.display().to_string()).collect(),
+                        };
+                        match serde_json::to_string_pretty(&output) {
+                            Ok(json) => println!("{}", json),
+                            Err(e) => {
+                                eprintln!("JSON error: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        for f in &files {
+                            println!("{}", f.display());
+                        }
+                        eprintln!("\nTotal: {} files", files.len());
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Sequence detection mode
     let result = Scanner::get_seqs(&args.paths, args.recursive, args.mask.as_deref(), args.min_len);
 
     // Report errors

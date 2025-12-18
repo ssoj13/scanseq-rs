@@ -26,8 +26,10 @@ pub struct Seq {
     pub end: i64,
     /// Padding (0 = variable/unpadded, >0 = fixed width)
     pub padding: usize,
-    /// Pattern string (cached)
+    /// Pattern string (lowercase on Windows for grouping)
     pattern: String,
+    /// First file path with original case (for file operations)
+    first_file_path: String,
 }
 
 impl Seq {
@@ -85,8 +87,11 @@ impl Seq {
 
         // Generate pattern using first file as template
         let pattern = gen_pattern(&files[0], frame_grp_idx, padding);
+        
+        // Store first file path with original case for file operations
+        let first_file_path = files[0].fpn.to_string_lossy().to_string();
 
-        Some(Seq { indices: frames, missed, start, end, padding, pattern })
+        Some(Seq { indices: frames, missed, start, end, padding, pattern, first_file_path })
     }
 
     /// Get sequence length (number of files)
@@ -211,11 +216,13 @@ impl Seq {
         self.indices.iter().map(|&f| self.format_frame(f)).collect()
     }
 
-    /// Get first file path in sequence.
+    /// Get first file path in sequence with original case.
+    /// Use this for file operations (reading, globbing) since pattern()
+    /// may have lowercase paths on Windows.
     #[must_use]
     #[allow(dead_code)] // Public API
-    pub fn first_file(&self) -> String {
-        self.format_frame(self.start)
+    pub fn first_file(&self) -> &str {
+        &self.first_file_path
     }
 
     /// Get last file path in sequence.

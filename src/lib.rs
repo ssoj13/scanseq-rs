@@ -136,6 +136,17 @@
 
 pub mod core;
 
+// Top-level re-exports of the main public types so Rust consumers can write
+// `scanseq::Seq` / `scanseq::detect` / `scanseq::Scanner` without the `core::`
+// prefix (matches how downstream crates already import them, e.g. exr-view).
+pub use core::{
+    detect, format_frame, get_seqs, scan_files, DetectError, ScanResult, ScannerBuilder, Seq,
+};
+// `Scanner` is lifted to the crate root only when the Python extension is NOT
+// built — with `python` the crate root already defines a PyO3 `Scanner` class.
+#[cfg(not(feature = "python"))]
+pub use core::Scanner;
+
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]

@@ -1,6 +1,6 @@
 [package]
 name = "scanseq"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "File sequence detector in Rust with Python interface for automation systems"
 license = "MIT"
@@ -17,21 +17,26 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "scanseq-cli"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [dependencies]
 glob = "0.3"
 rayon = "1.11"
-clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jwalk = "0.8"
-indicatif = "0.18"
 log = "0.4"
-env_logger = "0.11"
+# CLI-only deps: kept optional so plain `rlib` consumers (exr-view, codec-core)
+# don't pull an arg parser, progress UI, or a logger implementation.
+clap = { version = "4.5", features = ["derive"], optional = true }
+indicatif = { version = "0.18", optional = true }
+env_logger = { version = "0.11", optional = true }
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 
 [features]
 default = []
+# `cli` enables the scanseq-cli binary (arg parsing, progress bar, logger init).
+cli = ["dep:clap", "dep:indicatif", "dep:env_logger"]
 python = ["pyo3"]
 
 [dev-dependencies]

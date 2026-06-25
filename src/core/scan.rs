@@ -14,6 +14,9 @@
 
 use super::file::File;
 use super::seq::Seq;
+// `indicatif` (progress UI) is a CLI-only dependency: a programmatic library
+// consumer must not pull it or have a bar drawn during a scan.
+#[cfg(feature = "cli")]
 use indicatif::{ProgressBar, ProgressStyle};
 use jwalk::WalkDir;
 use log::{debug, info, warn};
@@ -21,6 +24,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "cli")]
 use std::sync::Arc;
 
 /// Scan directory for all subdirectories
@@ -180,8 +184,11 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
 
     let found_seqs = AtomicUsize::new(0);
 
-    // Progress bar
+    // Progress bar is CLI-only: under the default (library) build no bar is drawn,
+    // and the per-folder `log::info!/debug!` messages below carry progress instead.
+    #[cfg(feature = "cli")]
     let pb = Arc::new(ProgressBar::new(folders.len() as u64));
+    #[cfg(feature = "cli")]
     pb.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} folders ({msg})")
@@ -198,12 +205,14 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
                     Ok(f) => f,
                     Err(e) => {
                         warn!("Error scanning {}: {}", folder.display(), e);
+                        #[cfg(feature = "cli")]
                         pb.inc(1);
                         return Vec::new();
                     }
                 };
 
                 if files.is_empty() {
+                    #[cfg(feature = "cli")]
                     pb.inc(1);
                     return Vec::new();
                 }
@@ -224,10 +233,15 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
                     // Use fetch_add return value to avoid race condition in message
                     let prev = found_seqs.fetch_add(seq_count, std::sync::atomic::Ordering::Relaxed);
                     debug!("Found {} seqs in {}", seq_count, folder.display());
+                    // CLI-only running total on the progress bar; `prev` is unused otherwise.
+                    #[cfg(feature = "cli")]
                     pb.set_message(format!("{} seqs found", prev + seq_count));
+                    #[cfg(not(feature = "cli"))]
+                    let _ = prev;
                 }
 
-                // Update progress bar
+                // Update progress bar (CLI-only)
+                #[cfg(feature = "cli")]
                 pb.inc(1);
 
                 filtered
@@ -235,6 +249,7 @@ pub fn get_seqs<P: AsRef<Path>>(root: P, recursive: bool, mask: Option<&str>, mi
             .collect()
     });
 
+    #[cfg(feature = "cli")]
     pb.finish_with_message("Complete");
 
     let total_seqs = all_seqs.len();

@@ -384,3 +384,114 @@ impl ScannerBuilder {
         self.scan().result.seqs
     }
 }
+
+// === Unified detection entry point (file OR directory) ===
+
+/// Error from [`detect`]. Intentionally minimal; a full typed error set is a later pass.
+///
+/// Lives here so callers can `use scanseq::core::DetectError` alongside [`detect`].
+#[derive(Debug)]
+pub enum DetectError {
+    /// Directory holds more than one sequence — caller must disambiguate (e.g. pass a file).
+    Ambiguous { count: usize },
+    /// Filesystem / scan error.
+    Scan(String),
+}
+
+impl std::fmt::Display for DetectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DetectError::Ambiguous { count } => write!(f, "directory holds {count} sequences; pass a file to disambiguate"),
+            DetectError::Scan(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for DetectError {}
+
+/// Detect the sequence for a FILE or a DIRECTORY.
+/// - file -> the sequence containing it (via [`Scanner::from_file`])
+/// - dir  -> the single sequence if EXACTLY one exists (scanned NON-recursively);
+///           `Err(Ambiguous)` if 2+, `Ok(None)` if none.
+///
+/// No silent "pick longest" — ambiguity is a loud error by design, so callers
+/// (e.g. codec-core's EXR scanner) never quietly load the wrong sequence.
+///
+/// `min_len = 2` is passed to [`get_seqs`] so a lone file in the directory is not
+/// mistaken for a sequence, matching the rest of the crate's defaults.
+#[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+pub fn detect<P: AsRef<Path>>(path: P) -> Result<Option<Seq>, DetectError> {
+    let p = path.as_ref();
+    if p.is_dir() {
+        // Non-recursive scan of just this directory; min_len=2 ignores stray singletons.
+        let mut seqs = get_seqs(p, false, None, 2).map_err(DetectError::Scan)?;
+        match seqs.len() {
+            0 => Ok(None),
+            1 => Ok(Some(seqs.pop().expect("len checked == 1"))),
+            n => Err(DetectError::Ambiguous { count: n }),
+        }
+    } else {
+        // File path: AsRef<Path> flows straight into Scanner::from_file (no &str needed).
+        Ok(Scanner::from_file(p))
+    }
+}
+
+#[cfg(test)]
+mod detect_tests {
+    use super::*;
+    use std::fs;
+
+    /// Touch an empty file at `dir/name` (panics in tests only — acceptable).
+    fn touch(dir: &Path, name: &str) {
+        fs::write(dir.join(name), b"").expect("write temp file");
+    }
+
+    #[test]
+    fn test_detect_dir_single_seq() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        for n in 1..=4 {
+            touch(dir, &format!("render_{n:04}.exr"));
+        }
+        let seq = detect(dir).expect("scan ok").expect("one sequence");
+        assert_eq!(seq.start, 1);
+        assert_eq!(seq.end, 4);
+        assert_eq!(seq.len(), 4);
+    }
+
+    #[test]
+    fn test_detect_dir_ambiguous() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        // Two distinct-prefix sequences -> ambiguous, must be a loud error.
+        for n in 1..=3 {
+            touch(dir, &format!("alpha_{n:04}.exr"));
+            touch(dir, &format!("beta_{n:04}.exr"));
+        }
+        match detect(dir) {
+            Err(DetectError::Ambiguous { count }) => assert_eq!(count, 2),
+            other => panic!("expected Ambiguous{{2}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_detect_dir_empty() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let res = detect(tmp.path()).expect("scan ok");
+        assert!(res.is_none(), "empty dir must be Ok(None)");
+    }
+
+    #[test]
+    fn test_detect_single_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        for n in 1..=4 {
+            touch(dir, &format!("shot_{n:04}.exr"));
+        }
+        // Pass a single file of the sequence -> resolves the whole sequence.
+        let file = dir.join("shot_0002.exr");
+        let seq = detect(&file).expect("scan ok").expect("sequence for file");
+        assert_eq!(seq.start, 1);
+        assert_eq!(seq.end, 4);
+    }
+}

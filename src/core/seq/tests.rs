@@ -205,3 +205,56 @@ fn test_group_seqs_all_without_nums() {
     let seqs = Seq::group_seqs(&mut files);
     assert!(seqs.is_empty(), "Files without numbers should produce no sequences");
 }
+
+// --- PathBuf / ergonomic API tests ---
+
+#[test]
+fn test_frames_iter_ascending_pairs() {
+    use std::path::PathBuf;
+    // Frames 1,2,5 (gap at 3,4) -> frames() must yield only PRESENT frames, ascending.
+    let files = vec![
+        File::new("c:/temp/aaa_001.exr"),
+        File::new("c:/temp/aaa_002.exr"),
+        File::new("c:/temp/aaa_005.exr"),
+    ];
+    let seq = Seq::from_files(&files, 0).expect("should create sequence");
+
+    let pairs: Vec<(i64, PathBuf)> = seq.frames().collect();
+    // Numbers match indices exactly (ascending, present-only).
+    let nums: Vec<i64> = pairs.iter().map(|(n, _)| *n).collect();
+    assert_eq!(nums, seq.indices);
+    assert_eq!(nums, vec![1, 2, 5]);
+    // Paths match the formatted, present-frame paths.
+    let paths: Vec<PathBuf> = pairs.iter().map(|(_, p)| p.clone()).collect();
+    assert_eq!(paths, seq.paths());
+    assert_eq!(paths[0], PathBuf::from("c:/temp/aaa_001.exr"));
+    assert_eq!(paths[2], PathBuf::from("c:/temp/aaa_005.exr"));
+}
+
+#[test]
+fn test_get_path_present_and_missing() {
+    use std::path::PathBuf;
+    let files = vec![
+        File::new("c:/temp/aaa_001.exr"),
+        File::new("c:/temp/aaa_002.exr"),
+        File::new("c:/temp/aaa_005.exr"),
+    ];
+    let seq = Seq::from_files(&files, 0).expect("should create sequence");
+
+    assert_eq!(seq.get_path(2), Some(PathBuf::from("c:/temp/aaa_002.exr")));
+    assert_eq!(seq.get_path(3), None, "missing frame must be None");
+    assert_eq!(seq.get_path(999), None, "out-of-range frame must be None");
+}
+
+#[test]
+fn test_first_last_path() {
+    use std::path::PathBuf;
+    let files = vec![
+        File::new("c:/temp/aaa_001.exr"),
+        File::new("c:/temp/aaa_005.exr"),
+    ];
+    let seq = Seq::from_files(&files, 0).expect("should create sequence");
+    // first_path mirrors first_file (real stored path), last_path mirrors last_file (formatted).
+    assert_eq!(seq.first_path(), PathBuf::from(seq.first_file()));
+    assert_eq!(seq.last_path(), PathBuf::from(seq.last_file()));
+}

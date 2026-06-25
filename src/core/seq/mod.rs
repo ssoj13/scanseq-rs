@@ -9,6 +9,7 @@
 use super::file::File;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Maximum gap size to expand into missed frames list (OOM protection)
 const MAX_MISSED_GAP: i64 = 100_000;
@@ -230,6 +231,43 @@ impl Seq {
     #[allow(dead_code)] // Public API
     pub fn last_file(&self) -> String {
         self.format_frame(self.end)
+    }
+
+    // === PathBuf-typed twins of the String accessors (ergonomic Rust API) ===
+    // These exist so native Rust consumers (e.g. codec-core's EXR scanner) get
+    // `PathBuf` directly instead of re-wrapping the `String`-returning methods.
+
+    /// PathBuf for a present frame; `None` if `frame` is not in `indices`.
+    /// PathBuf twin of [`Seq::get_file`]. Used by Rust consumers (e.g. codec-core's EXR scanner).
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn get_path(&self, frame: i64) -> Option<PathBuf> {
+        self.get_file(frame).map(PathBuf::from)
+    }
+
+    /// PathBufs of all PRESENT frames, ascending. PathBuf twin of [`Seq::expand_existing`].
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.indices.iter().map(|&f| PathBuf::from(self.format_frame(f))).collect()
+    }
+
+    /// First on-disk path (stored original case, real file — mirrors [`Seq::first_file`]).
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn first_path(&self) -> PathBuf { PathBuf::from(self.first_file()) }
+
+    /// Last frame path (formatted from the pattern — mirrors [`Seq::last_file`]).
+    /// NOTE the inherited asymmetry: `first_path` is the real stored path, `last_path` is formatted.
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn last_path(&self) -> PathBuf { PathBuf::from(self.last_file()) }
+
+    /// Present frames as `(num, path)`, ascending — the canonical shape Rust consumers want.
+    /// Used by codec-core's EXR scanner to map frame numbers to on-disk paths in one pass.
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn frames(&self) -> impl Iterator<Item = (i64, PathBuf)> + '_ {
+        self.indices.iter().map(move |&f| (f, PathBuf::from(self.format_frame(f))))
     }
 
     /// Get frame count (number of existing frames, not range).

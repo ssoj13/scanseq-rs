@@ -436,6 +436,18 @@ pub fn detect<P: AsRef<Path>>(path: P) -> Result<Option<Seq>, DetectError> {
     }
 }
 
+/// Frame number of a SINGLE file from its name: the last contiguous ASCII-digit
+/// group (the convention for a lone frame that has no siblings to form a
+/// sequence). `None` if the name has no digits. This lets consumers handle a
+/// one-frame input (e.g. codec-core's single-frame encode) WITHOUT a bespoke
+/// parser — the digit rule lives here, in the canonical sequence crate.
+#[allow(dead_code)] // Public API
+pub fn frame_of<P: AsRef<Path>>(path: P) -> Option<i64> {
+    let f = File::new(path.as_ref());
+    let &(start, len) = f.num_groups.last()?;
+    f.name.get(start..start + len)?.parse::<i64>().ok()
+}
+
 #[cfg(test)]
 mod detect_tests {
     use super::*;
@@ -493,5 +505,12 @@ mod detect_tests {
         let seq = detect(&file).expect("scan ok").expect("sequence for file");
         assert_eq!(seq.start, 1);
         assert_eq!(seq.end, 4);
+    }
+
+    #[test]
+    fn test_frame_of() {
+        assert_eq!(frame_of("render_0042.exr"), Some(42));
+        assert_eq!(frame_of("plate.exr"), None);
+        assert_eq!(frame_of("cam2_0007.exr"), Some(7));
     }
 }

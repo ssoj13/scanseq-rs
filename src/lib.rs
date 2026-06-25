@@ -140,7 +140,8 @@ pub mod core;
 // `scanseq::Seq` / `scanseq::detect` / `scanseq::Scanner` without the `core::`
 // prefix (matches how downstream crates already import them, e.g. exr-view).
 pub use core::{
-    detect, format_frame, get_seqs, scan_files, DetectError, ScanResult, ScannerBuilder, Seq,
+    detect, format_frame, frame_of, get_seqs, scan_files, DetectError, ScanResult, ScannerBuilder,
+    Seq,
 };
 // `Scanner` is lifted to the crate root only when the Python extension is NOT
 // built — with `python` the crate root already defines a PyO3 `Scanner` class.

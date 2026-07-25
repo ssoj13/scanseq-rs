@@ -7,6 +7,7 @@
 //! 4. Create Seq for each sub-group with >= 2 files
 
 use super::file::File;
+use super::slice::FrameSlice;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -111,6 +112,86 @@ impl Seq {
     /// Get pattern with @ or ####
     pub fn pattern(&self) -> &str {
         &self.pattern
+    }
+
+    // === Subset selection (Python-slice / index-based) ===
+
+    /// Return a NEW `Seq` keeping only the frames selected by `slice`, applied
+    /// over this sequence's ascending present frames (`indices`). Thin wrapper
+    /// over [`Seq::select_indices`] + [`FrameSlice::resolve`].
+    ///
+    /// Used to drive a whole pipeline on a subset of an input sequence (e.g.
+    /// colmap-rs `auto --frames ::3`): the slice is resolved against the frame
+    /// COUNT, so it addresses present frames by position, not by frame number.
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn select(&self, slice: &FrameSlice) -> Seq {
+        self.select_indices(&slice.resolve(self.indices.len()))
+    }
+
+    /// Return a NEW `Seq` keeping only the frames at the given 0-based POSITIONS
+    /// in this sequence's ascending `indices`. Positions out of range are
+    /// skipped (never panics); the kept frames are sorted + de-duplicated so the
+    /// result is always a valid `Seq`. `start`/`end`/`missed` are recomputed
+    /// from the kept frames; `pattern`/`padding` are preserved.
+    ///
+    /// An empty selection yields an empty `Seq` (`is_empty()` true, `start ==
+    /// end == 0`) rather than an error — the caller decides whether "0 frames"
+    /// is fatal.
+    #[must_use]
+    #[allow(dead_code)] // Public API (unused by the bundled CLI bin)
+    pub fn select_indices(&self, positions: &[usize]) -> Seq {
+        let kept: Vec<i64> = positions
+            .iter()
+            .filter_map(|&p| self.indices.get(p).copied())
+            .collect();
+        self.with_indices(kept)
+    }
+
+    /// Rebuild a `Seq` from a kept frame-number set, recomputing the derived
+    /// range/missing fields and carrying the pattern/padding over. Shared core
+    /// of [`Seq::select`] / [`Seq::select_indices`].
+    ///
+    /// `first_file_path` (the original-case on-disk path, only ever surfaced by
+    /// [`Seq::first_file`]) is preserved when the original first frame survives,
+    /// else re-derived from the pattern for the new first frame — a valid path,
+    /// though it loses Windows original-case, which is acceptable since every
+    /// other accessor already formats from the (possibly lowercased) pattern.
+    fn with_indices(&self, mut indices: Vec<i64>) -> Seq {
+        indices.sort_unstable();
+        indices.dedup();
+
+        let (start, end) = match (indices.first(), indices.last()) {
+            (Some(&s), Some(&e)) => (s, e),
+            _ => (0, 0), // empty selection — caller checks is_empty()
+        };
+
+        // Recompute gaps with the same OOM guard as `from_files`.
+        let mut missed = Vec::new();
+        for w in indices.windows(2) {
+            let gap = w[1].saturating_sub(w[0]);
+            if gap > 1 && gap <= MAX_MISSED_GAP {
+                missed.extend((w[0] + 1)..w[1]);
+            }
+        }
+
+        let first_file_path = if indices.first() == self.indices.first() {
+            self.first_file_path.clone()
+        } else if let Some(&s) = indices.first() {
+            format_frame(&self.pattern, self.padding, s)
+        } else {
+            self.first_file_path.clone()
+        };
+
+        Seq {
+            indices,
+            missed,
+            start,
+            end,
+            padding: self.padding,
+            pattern: self.pattern.clone(),
+            first_file_path,
+        }
     }
 
     // === Frame-to-path methods (public API for library users) ===

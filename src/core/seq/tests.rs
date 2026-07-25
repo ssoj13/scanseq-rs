@@ -258,3 +258,73 @@ fn test_first_last_path() {
     assert_eq!(seq.first_path(), PathBuf::from(seq.first_file()));
     assert_eq!(seq.last_path(), PathBuf::from(seq.last_file()));
 }
+
+// --- Subset selection (Seq::select / select_indices) ---
+
+/// Build a padded 1..=10 sequence for selection tests (frames 1,2,...,10).
+fn ten_frame_seq() -> Seq {
+    let files: Vec<File> = (1..=10)
+        .map(|n| File::new(format!("c:/temp/f_{n:04}.exr")))
+        .collect();
+    Seq::from_files(&files, 0).expect("should create sequence")
+}
+
+#[test]
+fn test_select_every_third() {
+    // `::3` over 10 frames -> positions 0,3,6,9 -> frame numbers 1,4,7,10.
+    let seq = ten_frame_seq();
+    let sub = seq.select(&"::3".parse().expect("slice"));
+    assert_eq!(sub.indices, vec![1, 4, 7, 10]);
+    assert_eq!(sub.start, 1);
+    assert_eq!(sub.end, 10);
+    // Pattern/padding carry over unchanged.
+    assert_eq!(sub.pattern(), seq.pattern());
+    assert_eq!(sub.padding, seq.padding);
+    // Dropped frames between kept ones become "missed".
+    assert_eq!(sub.missed, vec![2, 3, 5, 6, 8, 9]);
+}
+
+#[test]
+fn test_select_from_index_preserves_first_file_reformat() {
+    // `5:` -> positions 5..10 -> frames 6..=10. First frame changed, so first_file
+    // is re-derived from the pattern for frame 6.
+    let seq = ten_frame_seq();
+    let sub = seq.select(&"5:".parse().expect("slice"));
+    assert_eq!(sub.indices, vec![6, 7, 8, 9, 10]);
+    assert_eq!(sub.start, 6);
+    assert_eq!(sub.first_file(), "c:/temp/f_0006.exr");
+}
+
+#[test]
+fn test_select_keeps_first_file_when_head_retained() {
+    // Head retained -> original-case first_file_path preserved verbatim.
+    let seq = ten_frame_seq();
+    let sub = seq.select(&":4".parse().expect("slice"));
+    assert_eq!(sub.indices, vec![1, 2, 3, 4]);
+    assert_eq!(sub.first_file(), seq.first_file());
+}
+
+#[test]
+fn test_select_empty_selection() {
+    // start beyond len -> 0 frames; Seq is empty, not a panic.
+    let seq = ten_frame_seq();
+    let sub = seq.select(&"50:".parse().expect("slice"));
+    assert!(sub.is_empty());
+    assert_eq!(sub.len(), 0);
+}
+
+#[test]
+fn test_select_indices_dedup_and_sort() {
+    // Out-of-order, duplicate, and out-of-range positions are normalized.
+    let seq = ten_frame_seq();
+    let sub = seq.select_indices(&[9, 0, 0, 3, 999]);
+    assert_eq!(sub.indices, vec![1, 4, 10]);
+}
+
+#[test]
+fn test_select_last_fifty_semantics_small() {
+    // `-3:` over 10 frames -> last 3 -> frames 8,9,10.
+    let seq = ten_frame_seq();
+    let sub = seq.select(&"-3:".parse().expect("slice"));
+    assert_eq!(sub.indices, vec![8, 9, 10]);
+}

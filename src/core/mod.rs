@@ -17,9 +17,11 @@
 mod file;
 mod seq;
 mod scan;
+mod slice;
 
 pub use seq::{Seq, format_frame};
 pub use scan::{get_seqs, scan_files};
+pub use slice::{FrameSlice, FrameSliceError};
 
 use file::File;
 

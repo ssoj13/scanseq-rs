@@ -125,6 +125,17 @@ impl FromStr for FrameSlice {
 }
 
 impl FrameSlice {
+    /// The uniform decode-time STRIDE this slice represents, if any: `Some(step)` iff it is a bare
+    /// `::step` (no start, no end) with `step > 1`. That is the ONLY slice shape a streaming decoder
+    /// can apply NATIVELY — it has a frame stride but no start offset and no from-end fold — so a
+    /// caller (e.g. video ingest) can push `::N` straight into the decoder and skip the post-decode
+    /// re-slice. Every other shape (any start/end, negative index, or `step <= 1`) returns `None`
+    /// and must be applied as a normal post-decode [`Self::resolve`]/select.
+    #[must_use]
+    pub fn as_uniform_stride(&self) -> Option<usize> {
+        (self.start.is_none() && self.end.is_none() && self.step > 1).then_some(self.step)
+    }
+
     /// Resolve to the ascending 0-based positions to KEEP over a sequence of
     /// `len` items, implementing Python's `slice(start, end, step).indices(len)`
     /// for a positive step: a negative index adds `len` ONCE, then the result is

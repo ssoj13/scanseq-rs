@@ -128,15 +128,54 @@ pub fn scan_files<P: AsRef<Path> + Sync>(roots: &[P], recursive: bool, exts: &[&
     Ok(files)
 }
 
+/// Expand shell-style brace alternation `{a,b,c}` in a glob mask into the concrete
+/// pattern list (cartesian product over every `{...}` group). The `glob` crate treats
+/// `{`/`}`/`,` as LITERAL characters — it has NO brace expansion — so a mask like
+/// `*.{exr,png}` compiled directly matches ZERO real files. [`ScannerBuilder::extensions`]
+/// emits exactly this multi-extension form for any preset with >1 ext (e.g. the 9-ext
+/// `VFX_IMAGE_EXTS`), so without expansion a multi-extension directory scan silently found
+/// nothing (0 sequences on a valid frame dir). A mask with no brace group returns `[mask]`
+/// unchanged; an unbalanced `{` (no closing `}`) is left literal rather than guessed at.
+fn expand_braces(mask: &str) -> Vec<String> {
+    let Some(open) = mask.find('{') else {
+        return vec![mask.to_string()];
+    };
+    let Some(close) = mask[open..].find('}').map(|i| open + i) else {
+        return vec![mask.to_string()];
+    };
+    let prefix = &mask[..open];
+    let alts = &mask[open + 1..close];
+    let suffix = &mask[close + 1..];
+    // Recurse on the suffix so multiple brace groups compose via cartesian product.
+    let tails = expand_braces(suffix);
+    let mut out = Vec::with_capacity(alts.split(',').count() * tails.len());
+    for alt in alts.split(',') {
+        for tail in &tails {
+            out.push(format!("{prefix}{alt}{tail}"));
+        }
+    }
+    out
+}
+
 /// Scan single folder for files with glob mask (internal, used by get_seqs)
 fn scan_files_glob<P: AsRef<Path>>(folder: P, mask: Option<&str>) -> Result<Vec<PathBuf>, String> {
     let folder = folder.as_ref();
     let entries = std::fs::read_dir(folder)
         .map_err(|e| format!("Failed to read dir {}: {}", folder.display(), e))?;
 
-    let glob_pattern = match mask {
-        Some(m) if m.contains('*') => Some(glob::Pattern::new(m).map_err(|e| format!("Invalid mask: {}", e))?),
-        _ => None,
+    // A mask filters only when it carries a wildcard OR a brace group; a plain string is
+    // ignored (every file passes), matching the historic behaviour. Brace groups are
+    // expanded HERE because the `glob` crate cannot (see `expand_braces`) — one
+    // `glob::Pattern` per alternative, and a file passes if ANY of them matches.
+    let patterns: Vec<glob::Pattern> = match mask {
+        Some(m) if m.contains('*') || m.contains('{') => {
+            let mut v = Vec::new();
+            for p in expand_braces(m) {
+                v.push(glob::Pattern::new(&p).map_err(|e| format!("Invalid mask {p:?}: {e}"))?);
+            }
+            v
+        }
+        _ => Vec::new(),
     };
 
     let mut files = Vec::new();
@@ -145,9 +184,10 @@ fn scan_files_glob<P: AsRef<Path>>(folder: P, mask: Option<&str>) -> Result<Vec<
         if !path.is_file() {
             continue;
         }
-        if let Some(ref pattern) = glob_pattern {
+        if !patterns.is_empty() {
             if let Some(name) = path.file_name() {
-                if !pattern.matches(&name.to_string_lossy()) {
+                let name = name.to_string_lossy();
+                if !patterns.iter().any(|p| p.matches(&name)) {
                     continue;
                 }
             }
@@ -356,5 +396,38 @@ mod tests {
         // Mix exact and glob
         let mixed = scan_files(&[root], false, &["png", "jp*"]).unwrap();
         assert_eq!(mixed.len(), 4);
+    }
+
+    #[test]
+    fn test_expand_braces() {
+        assert_eq!(expand_braces("*.png"), vec!["*.png"]);
+        assert_eq!(expand_braces("*.{png}"), vec!["*.png"]);
+        assert_eq!(expand_braces("*.{exr,png}"), vec!["*.exr", "*.png"]);
+        // No brace group -> mask returned unchanged.
+        assert_eq!(expand_braces("plate.exr"), vec!["plate.exr"]);
+        // Two brace groups compose via cartesian product.
+        assert_eq!(
+            expand_braces("{a,b}.{png,exr}"),
+            vec!["a.png", "a.exr", "b.png", "b.exr"]
+        );
+        // Unbalanced brace is left literal (no closing `}`).
+        assert_eq!(expand_braces("*.{png"), vec!["*.{png"]);
+    }
+
+    // Regression: a multi-extension brace mask (what `ScannerBuilder::extensions` emits for
+    // the 9-ext `VFX_IMAGE_EXTS`) must actually match files. Before the brace fix the `glob`
+    // crate matched `*.{...}` LITERALLY -> 0 files -> 0 sequences on a valid frame dir
+    // (surfaced as the "video decodes to PNG then exits" bug in colmap-rs `auto`).
+    #[test]
+    fn test_get_seqs_brace_extension_mask() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for n in 1..=5 {
+            fs::write(root.join(format!("IMG_1192.{n:06}.png")), "").unwrap();
+        }
+        let mask = "*.{exr,dpx,tif,tiff,png,jpg,jpeg,tga,hdr}";
+        let seqs = get_seqs(root, false, Some(mask), 2).unwrap();
+        assert_eq!(seqs.len(), 1, "one sequence expected, got {}", seqs.len());
+        assert_eq!(seqs[0].len(), 5);
     }
 }

@@ -40,10 +40,10 @@
 //! - `core`: Core sequence detection algorithm
 //! - Python bindings available when built with `--features python`
 
-mod core;
-
 use clap::Parser;
-use core::{format_frame, scan_files, Scanner, Seq};
+// The library's own `core`, not a second compiled copy of the module tree (`mod core;` here used to
+// build every module twice and flag library-only items as dead code in the binary).
+use scanseq::core::{format_frame, scan_files, Scanner, Seq};
 use std::path::PathBuf;
 
 use log::{debug, info};

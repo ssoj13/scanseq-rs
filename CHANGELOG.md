@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2026-10-04 — dependencies
+
+- All dependencies on their latest releases: pyo3 0.29, jwalk 0.9, rayon 1.12, clap 4.6, tempfile 3.27
+  (windows-sys 0.61 only in the graph).
+- pyo3 0.29: `allow_threads` → `detach`; `Seq.__getitem__` takes the interpreter token instead of
+  re-acquiring it and returns `Py<PyAny>` (the deprecated `PyObject` alias is gone). `Seq` and
+  `ScanResult` opt out of extraction-by-value (`skip_from_py_object`); nothing takes them by value.
+- `scanseq-cli` uses the library's `core` instead of compiling its own copy (`mod core;`), which also
+  removes the dead-code warnings that copy produced.
+
 ## [Unreleased] - 2025-11-29
 
 ### New Features

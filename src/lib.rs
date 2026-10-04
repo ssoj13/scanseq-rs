@@ -164,7 +164,7 @@ use rayon::prelude::*;
 
 /// Python-facing Seq class wrapping core::Seq
 #[cfg(feature = "python")]
-#[pyclass(name = "Seq")]
+#[pyclass(name = "Seq", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PySeq {
     #[pyo3(get)]
@@ -225,19 +225,17 @@ impl PySeq {
         vec!["pattern", "start", "end", "padding", "indices", "missed", "count"]
     }
 
-    fn __getitem__(&self, key: &str) -> PyResult<PyObject> {
-        Python::with_gil(|py| {
-            match key {
-                "pattern" => Ok(self.pattern.clone().into_pyobject(py)?.into_any().unbind()),
-                "start" => Ok(self.start.into_pyobject(py)?.into_any().unbind()),
-                "end" => Ok(self.end.into_pyobject(py)?.into_any().unbind()),
-                "padding" => Ok(self.padding.into_pyobject(py)?.into_any().unbind()),
-                "indices" => Ok(self.indices.clone().into_pyobject(py)?.into_any().unbind()),
-                "missed" => Ok(self.missed.clone().into_pyobject(py)?.into_any().unbind()),
-                "count" => Ok(self.indices.len().into_pyobject(py)?.into_any().unbind()),
-                _ => Err(pyo3::exceptions::PyKeyError::new_err(format!("Unknown key: {}", key))),
-            }
-        })
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
+        match key {
+            "pattern" => Ok(self.pattern.clone().into_pyobject(py)?.into_any().unbind()),
+            "start" => Ok(self.start.into_pyobject(py)?.into_any().unbind()),
+            "end" => Ok(self.end.into_pyobject(py)?.into_any().unbind()),
+            "padding" => Ok(self.padding.into_pyobject(py)?.into_any().unbind()),
+            "indices" => Ok(self.indices.clone().into_pyobject(py)?.into_any().unbind()),
+            "missed" => Ok(self.missed.clone().into_pyobject(py)?.into_any().unbind()),
+            "count" => Ok(self.indices.len().into_pyobject(py)?.into_any().unbind()),
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!("Unknown key: {}", key))),
+        }
     }
 
     fn __str__(&self) -> String {
@@ -346,7 +344,7 @@ impl PySeq {
 
 /// Python-facing ScanResult class wrapping core::ScanResult
 #[cfg(feature = "python")]
-#[pyclass(name = "ScanResult")]
+#[pyclass(name = "ScanResult", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyScanResult {
     /// Detected sequences (Arc for cheap iterator cloning)
@@ -452,7 +450,7 @@ impl Scanner {
     fn get_seq(py: Python, root: String, recursive: bool, mask: Option<String>, min_len: usize) -> PyResult<PyScanResult> {
         let start = Instant::now();
 
-        let (seqs, errors) = py.allow_threads(|| {
+        let (seqs, errors) = py.detach(|| {
             match core::get_seqs(&root, recursive, mask.as_deref(), min_len) {
                 Ok(s) => (s, Vec::new()),
                 Err(e) => (Vec::new(), vec![e]),
@@ -482,7 +480,7 @@ impl Scanner {
         let start = Instant::now();
 
         // Scan roots in parallel
-        let (seqs, errors) = py.allow_threads(|| {
+        let (seqs, errors) = py.detach(|| {
             let results: Vec<_> = roots.par_iter().map(|root| {
                 match core::get_seqs(root, recursive, mask.as_deref(), min_len) {
                     Ok(s) => (s, None),
@@ -519,7 +517,7 @@ impl Scanner {
     #[staticmethod]
     #[pyo3(signature = (path))]
     fn from_file(py: Python, path: String) -> Option<PySeq> {
-        py.allow_threads(|| {
+        py.detach(|| {
             core::Scanner::from_file(&path).map(PySeq::from)
         })
     }
@@ -565,7 +563,7 @@ impl Scanner {
     #[pyo3(signature = (roots, recursive=true, exts=vec![]))]
     fn scan_files(py: Python, roots: Vec<String>, recursive: bool, exts: Vec<String>) -> PyResult<Vec<String>> {
         let ext_refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
-        py.allow_threads(|| {
+        py.detach(|| {
             core::scan_files(&roots, recursive, &ext_refs)
                 .map(|files| files.iter().map(|p| p.display().to_string()).collect())
                 .map_err(pyo3::exceptions::PyRuntimeError::new_err)
@@ -585,7 +583,7 @@ impl Scanner {
         let min_len = self.min_len;
 
         // Release GIL during parallel Rust file scanning
-        let (seqs, errors) = py.allow_threads(|| {
+        let (seqs, errors) = py.detach(|| {
             let results: Vec<_> = roots.par_iter().map(|root| {
                 match core::get_seqs(root, recursive, mask.as_deref(), min_len) {
                     Ok(s) => (s, None),

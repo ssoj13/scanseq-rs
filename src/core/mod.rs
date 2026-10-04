@@ -414,7 +414,7 @@ impl std::error::Error for DetectError {}
 /// Detect the sequence for a FILE or a DIRECTORY.
 /// - file -> the sequence containing it (via [`Scanner::from_file`])
 /// - dir  -> the single sequence if EXACTLY one exists (scanned NON-recursively);
-///           `Err(Ambiguous)` if 2+, `Ok(None)` if none.
+///   `Err(Ambiguous)` if 2+, `Ok(None)` if none.
 ///
 /// No silent "pick longest" — ambiguity is a loud error by design, so callers
 /// (e.g. codec-core's EXR scanner) never quietly load the wrong sequence.

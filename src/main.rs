@@ -82,6 +82,7 @@ struct Args {
 }
 
 fn main() {
+    let _crash_guard = crashdump::init!();
     // Initialize logger - respect RUST_LOG, default to Info
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 

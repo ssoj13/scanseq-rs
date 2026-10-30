@@ -20,6 +20,7 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+crashdump = { package = "crashdump-rs", git = "ssh://git@github.com/ssoj13/crashdump-rs.git", branch = "main" }
 glob = "0.3"
 rayon = "1.12"
 serde = { version = "1.0", features = ["derive"] }
